@@ -13,16 +13,25 @@ const favoritesRouter = require('./routes/favorites');
 
 const app = express();
 
+// ── Trust proxy (necessário na Vercel) ───────────────────
+app.set('trust proxy', 1);
+
 // ── Segurança básica ──────────────────────────────────────
 app.use(helmet());
 app.use(morgan('dev'));
 
 // ── CORS ─────────────────────────────────────────────────
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
+// Se ALLOWED_ORIGINS não estiver definido, libera qualquer origem *.vercel.app
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+
 app.use(cors({
   origin: (origin, cb) => {
-    // Permite requisições sem origin (ex: Postman, SSR) e origens autorizadas
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    // Sem origin = Postman / curl / SSR → ok
+    if (!origin) return cb(null, true);
+    // Origem explicitamente autorizada → ok
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    // Fallback: qualquer subdomínio vercel.app em desenvolvimento → ok
+    if (origin.endsWith('.vercel.app')) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} não autorizada`));
   },
   credentials: true,
@@ -32,7 +41,7 @@ app.use(express.json());
 
 // ── Rate limiting ─────────────────────────────────────────
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
+  windowMs: 15 * 60 * 1000,
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
