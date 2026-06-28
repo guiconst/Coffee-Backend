@@ -3,22 +3,63 @@ const supabase        = require('../supabase');
 const { requireAuth } = require('../middleware/auth');
 const router          = express.Router();
 
+// ── Helpers ───────────────────────────────────────────────
+
+function translateSupabaseError(message = '') {
+  if (!message) return 'Erro ao processar a requisição.';
+  const m = message.toLowerCase();
+  if (m.includes('user already registered') || m.includes('already been registered')) {
+    return 'Este e-mail já está cadastrado. Tente fazer login.';
+  }
+  if (m.includes('invalid email')) return 'E-mail inválido.';
+  if (m.includes('password') && m.includes('characters')) return 'A senha deve ter no mínimo 6 caracteres.';
+  if (m.includes('email not confirmed')) return 'E-mail ainda não confirmado. Verifique sua caixa de entrada.';
+  if (m.includes('invalid login credentials') || m.includes('invalid credentials')) return 'E-mail ou senha incorretos.';
+  if (m.includes('email rate limit')) return 'Muitas tentativas. Aguarde alguns minutos e tente novamente.';
+  if (m.includes('signup is disabled')) return 'Cadastro temporariamente desabilitado.';
+  return message;
+}
+
 /**
  * POST /api/auth/register
  * Body: { email, password, full_name }
  */
 router.post('/register', async (req, res) => {
   const { email, password, full_name } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
+  }
 
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { full_name } },
+    options: { data: { full_name: full_name || '' } },
   });
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.status(201).json({ user: data.user, session: data.session });
+  if (error) {
+    console.error('[register] Supabase error:', error);
+    // Traduz mensagens comuns do Supabase para português
+    const msg = translateSupabaseError(error.message);
+    return res.status(400).json({ error: msg });
+  }
+
+  // Supabase retorna identities[] vazio quando o e-mail já está cadastrado
+  // mas "confirm email" está ativo — o usuário existe mas não confirmou
+  if (data.user && data.user.identities && data.user.identities.length === 0) {
+    return res.status(400).json({ error: 'Este e-mail já está cadastrado. Tente fazer login.' });
+  }
+
+  // session é null quando e-mail de confirmação foi enviado
+  res.status(201).json({
+    user: data.user,
+    session: data.session,
+    emailConfirmationRequired: !data.session,
+  });
 });
 
 /**
@@ -30,7 +71,10 @@ router.post('/login', async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
 
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) return res.status(401).json({ error: 'Credenciais inválidas.' });
+  if (error) {
+    console.error('[login] Supabase error:', error);
+    return res.status(401).json({ error: translateSupabaseError(error.message) });
+  }
 
   res.json({ user: data.user, session: data.session });
 });
