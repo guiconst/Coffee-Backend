@@ -10,17 +10,19 @@ const router   = express.Router();
  *   tag       → filtra por tag     (ex: destaque)
  *   q         → busca no nome/descrição
  */
+const PRODUCT_FIELDS = `
+  id, name, slug, description, long_description, price, image_url,
+  is_available, is_promotion, promo_price, tags, sizes, extras, category_id,
+  categories ( id, name, slug )
+`;
+
 router.get('/', async (req, res) => {
   try {
     const { category, promotion, tag, q } = req.query;
 
     let query = supabase
       .from('products')
-      .select(`
-        id, name, slug, description, price, image_url,
-        is_available, is_promotion, promo_price, tags,
-        categories ( id, name, slug )
-      `)
+      .select(PRODUCT_FIELDS)
       .eq('is_available', true)
       .order('name');
 
@@ -58,7 +60,6 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/products/categories
- * Lista todas as categorias com contagem de produtos disponíveis
  */
 router.get('/categories', async (_req, res) => {
   try {
@@ -66,12 +67,30 @@ router.get('/categories', async (_req, res) => {
       .from('categories')
       .select('id, name, slug, sort_order')
       .order('sort_order');
-
     if (error) throw error;
     res.json({ categories: data });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro ao buscar categorias.' });
+  }
+});
+
+/**
+ * GET /api/products/id/:id
+ * Detalhes de um produto pelo UUID
+ */
+router.get('/id/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select(PRODUCT_FIELDS)
+      .eq('id', req.params.id)
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'Produto não encontrado.' });
+    res.json({ product: data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao buscar produto.' });
   }
 });
 
@@ -83,16 +102,10 @@ router.get('/:slug', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('products')
-      .select(`
-        id, name, slug, description, price, image_url,
-        is_available, is_promotion, promo_price, tags,
-        categories ( id, name, slug )
-      `)
+      .select(PRODUCT_FIELDS)
       .eq('slug', req.params.slug)
       .single();
-
     if (error || !data) return res.status(404).json({ error: 'Produto não encontrado.' });
-
     res.json({ product: data });
   } catch (err) {
     console.error(err);
